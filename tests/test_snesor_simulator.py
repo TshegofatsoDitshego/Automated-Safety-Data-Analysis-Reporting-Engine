@@ -1,5 +1,5 @@
 import unittest
-from sensor_simulator import generate_reading
+from scr.ingestion.sensor_simulator import generate_reading
 
 
 class TestSensorSimulator(unittest.TestCase):

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, engine
 import models
-from sensor_simulator import generate_reading
+from scr.ingestion.sensor_simulator import generate_reading
 from safety_engine import evaluate_reading
 from ai_advisor import generate_advice
 
