@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB for time-series data
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: safety_timescaledb
+    environment:
+      POSTGRES_DB: safety_analytics
+      POSTGRES_USER: safety_admin
+      POSTGRES_PASSWORD: safety_dev_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safety_admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for message queue and caching
+  redis:
+    image: redis:7-alpine
+    container_name: safety_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # FastAPI backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: safety_api
+    environment:
+      DATABASE_URL: postgresql://safety_admin:safety_dev_2024@timescaledb:5432/safety_analytics
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - ./reports:/app/reports
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Celery worker for background processing
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: safety_celery_worker
+    environment:
+      DATABASE_URL: postgresql://safety_admin:safety_dev_2024@timescaledb:5432/safety_analytics
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    volumes:
+      - ./backend:/app
+      - ./reports:/app/reports
+    depends_on:
+      - timescaledb
+      - redis
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  # Celery beat for scheduled tasks
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: safety_celery_beat
+    environment:
+      DATABASE_URL: postgresql://safety_admin:safety_dev_2024@timescaledb:5432/safety_analytics
+      REDIS_URL: redis://redis:6379/0
+      ENVIRONMENT: development
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - timescaledb
+      - redis
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+
+  # React frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: safety_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  timescale_data:
+  redis_data:
